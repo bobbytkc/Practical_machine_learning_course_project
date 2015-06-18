@@ -1,0 +1,93 @@
+---
+title: "Practical Machine Learning Writeup"
+author: "Bobby Tan"
+date: "Monday, June 15, 2015"
+output: html_document
+---
+
+##Abstract
+
+In this write up, we apply machine learning concepts to try and predict if a dumbell lift is being performed correctly. We use Principle component analysis to cull the data to a manageable size, following by fitting a model using the Random Forests method. The resulting model is estimated to have an accuracy of 97.5% accuracy. The model fit is then used to predict the outcomes of a separate test set.
+
+##Introduction
+The data is composed of measurements from accelerometers placed on test subjects performing the barbell lifts in a variety of ways. For a more detailed description see 
+[http://groupware.les.inf.puc-rio.br/har] (http://groupware.les.inf.puc-rio.br/har). In particular, the column `classe`
+
+##Data Preprocessing
+The data file contains a lot of columns. There is no way to visualize the data considering the large number of predictors, but a simple observation is that the columns that have empty rows or rows with NA inputs contain very little data. These are removed from the training data and test data.
+
+``` {r ,cache = TRUE}
+trainingData <- read.csv("./trainingData.csv")
+testingData <- read.csv("./testingData.csv")
+
+# cull unnecesary columns for training data and testing data respectively.
+
+colInd1 <- which(is.na(trainingData[1,])==TRUE) ## finds columns with NAs
+colInd2 <- which(trainingData[1,]=="") ## finds columns which are empty
+colInd <- c(colInd1,colInd2) ##index of useless columns
+
+trainingData2 <- trainingData[, -colInd]
+trainingData2 <- trainingData2[,-c(1:7)]
+testingData2 <- testingData[, -colInd]
+testingData2 <- testingData2[,-c(1:7)]
+```
+
+After this process, there remains 53 columns including the outcomes, from 160 in the begining. We cull even more data from this by using Principle Component Analysis (PCA), and set the threshold to include at least 95% of the variation in the data.
+
+```{r, cache = TRUE}
+#Use Principle Component Analysis to cull even more columns.
+#Column 53 is the outcome. Removed for PCA analysis since
+#predictors and outcomes should not mix. The threshold is chosen
+#to be 95% of the total variability
+library(caret)
+preProc <- preProcess(trainingData2[,-53], method = "pca", thresh = 0.95) 
+trainingPCA<- predict(preProc, newdata = trainingData2[,-53])
+trainingPCA <- cbind(trainingPCA, trainingData2[53])
+
+#used the dame preProc object from the training phase for the testing data
+testingPCA<- predict(preProc, newdata = testingData2[,-53])
+testingPCA <- cbind(testingPCA, testingData2[53])
+```
+
+#Model fitting and analysis
+
+For the model fit, we use a subset of the training data to create the model, and use the remaining data as a probe to test the accuracy of the model. Due to computational constraints, only 25% of the data will be used for the model fitting, and 75% of the data will be used for the probe. This will cut down the computational time significantly.
+
+```{r, cache = TRUE}
+outcomeVector <- as.character(trainingPCA[,26])
+trainingSubInd <- createDataPartition(trainingPCA[,26], p= 0.25, list = FALSE)
+trainingSubset <- trainingPCA[trainingSubInd,]
+probeSubset <- trainingPCA[-trainingSubInd,]
+
+```
+
+The model is now created using the Random Forest method. Note that for random forests in particular, cross validation is built into the caret package, so no further cross validation is performed. By default, 10 fold CV is performed under the caret package (see [details](http://www.edii.uclm.es/~useR-2013/Tutorials/kuhn/user_caret_2up.pdf) under "Classification Trees").All the features left over from the PCA process is used.
+
+```{r, cache = TRUE}
+set.seed(1111) ## for reproducibility
+modelFit <- train(classe ~ ., data = trainingPCA, method = "rf", preproc= c("centre", "scale"))
+modelFit
+```
+
+We see that the model has an estimated 97.5% accuracy obtained by aggregating 25 bootstrapped samples. The out of bag error rate (the error rate of the samples *not* used for bagging in the randfom forest process) is estimated to be 1.59%.   We apply the model to the probe data:
+
+```{r, cache = TRUE}
+probePredictions <- predict(modelFit, probeSubset[,-26] )
+confusionMatrix(data = probePredictions, reference =  probeSubset[,26])
+```
+
+The confusion matrix reveals that the model is suprisingly accurate. In fact, the out of sample error rate is in this case 0%, which suggests a fluke performance. This is probably an underestimate of the actual out of sample error rate.
+
+The model is then used to predict the test data:
+
+```r
+#Finally, apply the model for the test set
+testingPredictions <- predict(modelFit, testingPCA[,-26])
+```
+
+Prediction is not shown since we don't have information about the true outcomes to compare it with.
+
+#Conclusion
+Performing PCA with a 95% variability threshold, followed by random forests model fitting yielded a highly accurate model for predicting if a dumbbell lifting action was performed correctly.
+
+
